@@ -1,0 +1,7 @@
+# compiled binary
+/mcp_toy
+
+# runtime database
+*.db
+*.db-shm
+*.db-wal
