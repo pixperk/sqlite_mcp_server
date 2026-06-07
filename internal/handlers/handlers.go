@@ -5,12 +5,18 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/pixperk/mcp_toy/internal/store"
 )
+
+// resourceScheme is the URI scheme this server uses for its resources, e.g.
+// "kv://all" or "kv://color".
+const resourceScheme = "kv://"
 
 // Handlers holds the dependencies the tool/prompt handlers need. Using a struct
 // (instead of a package-level global) keeps state explicit and testable.
@@ -146,8 +152,60 @@ func (h *Handlers) summarizeStore(ctx context.Context, req *mcp.GetPromptRequest
 	}, nil
 }
 
-// Register adds all tools and prompts to the server. Tool Descriptions matter:
-// they are how the model decides WHEN to call each tool.
+// ----------------------------------------------------------------------------
+// Resource handlers. Resources are read-only data the AI can pull in as
+// context, addressed by URI. Signature: (ctx, *ReadResourceRequest) (*ReadResourceResult, error).
+//
+// Unlike tools (which the model calls to *act*), resources are data the client
+// can *attach* to the conversation. We expose two:
+//
+//   - a fixed resource  "kv://all"   -> the whole store as a JSON object
+//   - a template        "kv://{key}" -> a single key's value as plain text
+// ----------------------------------------------------------------------------
+
+// resourceAll returns the entire store as a JSON document.
+func (h *Handlers) resourceAll(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	data, err := h.Store.All(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading store: %w", err)
+	}
+	body, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encoding store: %w", err)
+	}
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{{
+			URI:      req.Params.URI,
+			MIMEType: "application/json",
+			Text:     string(body),
+		}},
+	}, nil
+}
+
+// resourceByKey returns a single key's value. The requested URI looks like
+// "kv://color"; we strip the scheme to recover the key. If the key does not
+// exist we return ResourceNotFoundError so the client gets a proper 404-style
+// response rather than empty content.
+func (h *Handlers) resourceByKey(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	key := strings.TrimPrefix(req.Params.URI, resourceScheme)
+	value, found, err := h.Store.Get(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("reading %q: %w", key, err)
+	}
+	if !found {
+		return nil, mcp.ResourceNotFoundError(req.Params.URI)
+	}
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{{
+			URI:      req.Params.URI,
+			MIMEType: "text/plain",
+			Text:     value,
+		}},
+	}, nil
+}
+
+// Register adds all tools, prompts, and resources to the server. Tool/resource
+// Descriptions matter: they are how the model decides WHEN to use each.
 func (h *Handlers) Register(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "kv_set",
@@ -185,4 +243,22 @@ func (h *Handlers) Register(server *mcp.Server) {
 			},
 		},
 	}, h.summarizeStore)
+
+	// A fixed resource: the whole store as one JSON document.
+	server.AddResource(&mcp.Resource{
+		URI:         "kv://all",
+		Name:        "store_snapshot",
+		Description: "The entire key/value store as a JSON object.",
+		MIMEType:    "application/json",
+	}, h.resourceAll)
+
+	// A resource template: one resource per key, addressed as kv://{key}. The
+	// {key} placeholder is RFC 6570 syntax; the handler reads req.Params.URI to
+	// learn which key was requested.
+	server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "kv://{key}",
+		Name:        "store_value",
+		Description: "The value stored under a single key, as plain text.",
+		MIMEType:    "text/plain",
+	}, h.resourceByKey)
 }

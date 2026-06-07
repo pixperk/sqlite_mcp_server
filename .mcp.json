@@ -1,7 +1,8 @@
 {
   "mcpServers": {
     "mcp_toy": {
-      "command": "/Users/tronny/code/mco/mcp_toy"
+      "command": "go",
+      "args": ["run", "./cmd/mcp_toy"]
     }
   }
 }
