@@ -1,4 +1,4 @@
-# mcp_toy
+# sqlite_mcp_server
 
 A tiny, heavily-commented [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server in Go. It hands an AI client (Claude Code, Claude Desktop, Cursor, …) a SQLite-backed key/value store through all three MCP primitives: **tools**, **prompts**, and **resources**.
 
@@ -10,13 +10,13 @@ It exists to be *read*. If you've never built an MCP server, this is a complete,
 
 ```bash
 # 1. clone + enter
-git clone https://github.com/pixperk/mcp_toy && cd mcp_toy
+git clone https://github.com/pixperk/sqlite_mcp_server && cd sqlite_mcp_server
 
 # 2. build (single self-contained binary, no cgo)
-go build -o mcp_toy ./cmd/mcp_toy
+go build -o sqlite_mcp_server ./cmd/sqlite_mcp_server
 
 # 3. poke it without any AI; the MCP Inspector gives you a clickable UI
-npx @modelcontextprotocol/inspector ./mcp_toy
+npx @modelcontextprotocol/inspector ./sqlite_mcp_server
 ```
 
 To use it from **Claude Code**, the bundled [`.mcp.json`](.mcp.json) is auto-discovered; just reload the window and approve the server. Then talk to it:
@@ -27,10 +27,10 @@ To use it from **Claude Code**, the bundled [`.mcp.json`](.mcp.json) is auto-dis
 To use it from **Claude Desktop**, add to `~/Library/Application Support/Claude/claude_desktop_config.json` and restart:
 
 ```json
-{ "mcpServers": { "mcp_toy": { "command": "/absolute/path/to/mcp_toy" } } }
+{ "mcpServers": { "sqlite_mcp_server": { "command": "/absolute/path/to/sqlite_mcp_server" } } }
 ```
 
-> An MCP stdio server is **not** meant to be run by hand. If you just `./mcp_toy` it sits silently waiting for JSON-RPC on stdin. That's correct; it's designed to be launched by a client.
+> An MCP stdio server is **not** meant to be run by hand. If you just `./sqlite_mcp_server` it sits silently waiting for JSON-RPC on stdin. That's correct; it's designed to be launched by a client.
 
 ---
 
@@ -63,7 +63,7 @@ To use it from **Claude Desktop**, add to `~/Library/Application Support/Claude/
 
 ## How MCP actually works
 
-Under the hood, MCP is just **JSON-RPC 2.0** messages over a transport. This server uses the **stdio** transport: the client launches the binary as a subprocess and pipes messages over stdin/stdout. (Because stdout *is* the protocol channel, all logging goes to stderr; writing to stdout would corrupt the stream. See [`cmd/mcp_toy/main.go`](cmd/mcp_toy/main.go).)
+Under the hood, MCP is just **JSON-RPC 2.0** messages over a transport. This server uses the **stdio** transport: the client launches the binary as a subprocess and pipes messages over stdin/stdout. (Because stdout *is* the protocol channel, all logging goes to stderr; writing to stdout would corrupt the stream. See [`cmd/sqlite_mcp_server/main.go`](cmd/sqlite_mcp_server/main.go).)
 
 Every session opens with a handshake, then the client discovers and uses capabilities:
 
@@ -71,7 +71,7 @@ Every session opens with a handshake, then the client discovers and uses capabil
 %%{init: {'theme':'base','themeVariables':{'actorBkg':'#E3F2FD','actorBorder':'#90CAF9','actorTextColor':'#0D47A1','signalColor':'#B0BEC5','signalTextColor':'#90A4AE','lineColor':'#B0BEC5','noteBkgColor':'#FFF9C4','noteBorderColor':'#FFF59D','noteTextColor':'#5D4037'}}}%%
 sequenceDiagram
     participant C as Client (Claude)
-    participant S as Server (mcp_toy)
+    participant S as Server (sqlite_mcp_server)
 
     Note over C,S: Handshake
     C->>S: initialize
@@ -131,7 +131,7 @@ Returning a non-nil `error` tells the model the tool *failed*, and the message i
 sequenceDiagram
     participant U as User
     participant C as Claude
-    participant S as mcp_toy
+    participant S as sqlite_mcp_server
 
     U->>C: "remember my favourite colour is blue"
     Note over C: model decides a tool is needed
@@ -164,7 +164,7 @@ Later, *"what colours do I have stored?"* might make the model reach for `kv_que
 ### Prompts
 
 1. The client calls `prompts/list`; the server returns each prompt's name, description, and declared arguments.
-2. The **user** picks one (in Claude Code it shows up like `/mcp__mcp_toy__summarize_store`) and supplies arguments.
+2. The **user** picks one (in Claude Code it shows up like `/mcp__sqlite_mcp_server__summarize_store`) and supplies arguments.
 3. The client calls `prompts/get`; your handler builds and returns the actual message(s) to seed the conversation.
 
 A prompt handler can do real work: `summarize_store` reads the **live** database and templates its contents in:
@@ -185,7 +185,7 @@ func (h *Handlers) summarizeStore(ctx context.Context, req *mcp.GetPromptRequest
 sequenceDiagram
     participant U as User
     participant C as Claude
-    participant S as mcp_toy
+    participant S as sqlite_mcp_server
 
     U->>C: invokes /summarize_store (focus = "preferences")
     C->>S: prompts/get { "name": "summarize_store", "arguments": { "focus": "preferences" } }
@@ -215,11 +215,11 @@ and the server returns a ready-to-send message that already contains the live da
 **From the user's side**, in Claude Code you invoke it as a slash command (server-prefixed):
 
 ```text
-/mcp__mcp_toy__summarize_store
-/mcp__mcp_toy__summarize_store focus="preferences"
+/mcp__sqlite_mcp_server__summarize_store
+/mcp__sqlite_mcp_server__summarize_store focus="preferences"
 ```
 
-In Claude Desktop it appears in the prompt picker (the `+` / "Add from mcp_toy" menu) as **summarize_store**, with a field to fill in `focus`.
+In Claude Desktop it appears in the prompt picker (the `+` / "Add from sqlite_mcp_server" menu) as **summarize_store**, with a field to fill in `focus`.
 
 ### Resources
 
@@ -249,9 +249,9 @@ server.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: "kv://{key}", Name
 sequenceDiagram
     participant U as User
     participant C as Claude
-    participant S as mcp_toy
+    participant S as sqlite_mcp_server
 
-    U->>C: attaches @mcp_toy resource kv://color
+    U->>C: attaches @sqlite_mcp_server resource kv://color
     C->>S: resources/read { "uri": "kv://color" }
     Note over S: TrimPrefix("kv://color", "kv://") -> "color"
     S-->>C: contents: [ text/plain "blue" ]
@@ -275,12 +275,12 @@ and the server returns the contents (a miss returns a not-found error instead):
 **From the user's side**, you pull a resource into context with an `@` mention:
 
 ```text
-@mcp_toy                       # opens the resource picker for this server
-@mcp_toy:kv://all              # attach the whole store as JSON context
-@mcp_toy:kv://color            # attach just one key's value
+@sqlite_mcp_server                       # opens the resource picker for this server
+@sqlite_mcp_server:kv://all              # attach the whole store as JSON context
+@sqlite_mcp_server:kv://color            # attach just one key's value
 ```
 
-In Claude Desktop, click the 🔌 / paperclip and pick a resource from **mcp_toy** to attach it to the message.
+In Claude Desktop, click the 🔌 / paperclip and pick a resource from **sqlite_mcp_server** to attach it to the message.
 
 ---
 
@@ -303,7 +303,7 @@ Each stage was verified by piping a raw JSON-RPC handshake straight into the bin
 
 ```
 .
-├── cmd/mcp_toy/main.go           # entrypoint: open store, build + run server over stdio
+├── cmd/sqlite_mcp_server/main.go           # entrypoint: open store, build + run server over stdio
 ├── internal/store/store.go       # all SQL: Set/Get/Delete/List/All/Query + the read-only guard
 ├── internal/handlers/handlers.go # all MCP wiring: tool, prompt + resource handlers and registration
 ├── .mcp.json                     # client config for Claude Code (uses `go run`, so it's portable)
@@ -331,7 +331,7 @@ This guard is a **speed bump, not a wall**; it's string matching, not a SQL pars
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-db` | `file:mcp_toy.db?_pragma=busy_timeout(5000)` | SQLite DSN. Use `file::memory:?cache=shared` for an ephemeral store. |
+| `-db` | `file:sqlite_mcp_server.db?_pragma=busy_timeout(5000)` | SQLite DSN. Use `file::memory:?cache=shared` for an ephemeral store. |
 
 ### Raw smoke test
 
@@ -342,5 +342,5 @@ printf '%s\n' \
 '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}' \
 '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
 '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-; sleep 1 | ./mcp_toy
+; sleep 1 | ./sqlite_mcp_server
 ```
